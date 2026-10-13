@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -240,6 +241,89 @@ def test_scrubs_recent_text_artifacts_and_preserves_source_fixtures(
     assert "new-secret-value" not in recent.read_text(encoding="utf-8")
     assert "fake-test-value" in source.read_text(encoding="utf-8")
     assert "active-secret-value" in active_log.read_text(encoding="utf-8")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended-length paths")
+@pytest.mark.parametrize("layout", ["long_file", "long_directory", "long_temporary"])
+@pytest.mark.parametrize("streaming", [False, True])
+@pytest.mark.parametrize("prefixed_root", [False, True])
+def test_round_guard_scrubs_windows_long_paths(
+    tmp_path: Path, monkeypatch, layout: str, streaming: bool, prefixed_root: bool,
+) -> None:
+    root = tmp_path.resolve()
+    io_root = Path("\\\\?\\" + str(root))
+    parent = io_root
+    if layout == "long_directory":
+        while len(str(parent)) < 280:
+            parent /= "nested_" + "x" * 30
+        filename = "response.headers"
+    else:
+        # The short file fits MAX_PATH, but its atomic replacement name does not.
+        target_length = 248 if layout == "long_temporary" else 280
+        filename = "x" * (target_length - len(str(root)) - 1 - len(".headers"))
+        filename += ".headers"
+    parent.mkdir(parents=True, exist_ok=True)
+    artifact = parent / filename
+    raw = b"x-api-key: synthetic-long-path-secret-value\r\nstatus: 200\r\n"
+    artifact.write_bytes(raw)
+    source = parent / "fixture.py"
+    fixture = b'HEADER = "x-api-key: synthetic-source-fixture"\r\n'
+    source.write_bytes(fixture)
+    if streaming:
+        monkeypatch.setattr(secret_guard, "_MAX_ARTIFACT_BYTES", 8)
+        monkeypatch.setattr(secret_guard, "_STREAM_CHUNK_BYTES", 16)
+    events: list[dict] = []
+
+    report, _note = _apply_round_secret_guard(
+        workdir=io_root if prefixed_root else root,
+        modified_since=time.time() - 5,
+        round_index=1,
+        round_max=2,
+        on_event=events.append,
+    )
+
+    relative = artifact.relative_to(io_root).as_posix()
+    assert report.errors == ()
+    assert not report.truncated
+    assert report.scanned_files == 2
+    assert report.redacted_paths == (relative,)
+    assert report.replacement_count == 1
+    assert artifact.read_bytes() == b"x-api-key: <REDACTED:secret>\r\nstatus: 200\r\n"
+    assert source.read_bytes() == fixture
+    assert {path.name for path in parent.iterdir()} == {filename, "fixture.py"}
+    assert len(events) == 1
+    assert events[0]["operator_alert"] is False
+    assert events[0]["scan_errors"] == []
+    assert events[0]["redacted_paths"] == [relative]
+
+
+def test_round_guard_still_alerts_on_artifact_read_error(tmp_path: Path, monkeypatch) -> None:
+    artifact = tmp_path / "response.txt"
+    payload = b"x-api-key: synthetic-unreadable-secret\n"
+    artifact.write_bytes(payload)
+    read_bytes = Path.read_bytes
+
+    def deny_artifact_read(path: Path) -> bytes:
+        if path.name == artifact.name:
+            raise PermissionError("synthetic access denial")
+        return read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", deny_artifact_read)
+    events: list[dict] = []
+    report, note = _apply_round_secret_guard(
+        workdir=tmp_path,
+        modified_since=time.time() - 5,
+        round_index=1,
+        round_max=2,
+        on_event=events.append,
+    )
+
+    assert report.errors == ("response.txt: PermissionError",)
+    assert not report.changed
+    assert events[0]["operator_alert"] is True
+    assert events[0]["scan_errors"] == list(report.errors)
+    assert "Secret scan errors: response.txt: PermissionError" in note
+    assert read_bytes(artifact) == payload
 
 
 def test_scrub_preserves_cue_schema_token_labels(tmp_path: Path) -> None:
@@ -657,7 +741,7 @@ def test_large_recent_text_artifact_surfaces_incomplete_coverage(
     monkeypatch.setattr(secret_guard, "_MAX_ARTIFACT_BYTES", 8)
     monkeypatch.setattr(secret_guard, "_HARD_MAX_ARTIFACT_BYTES", 8)
     payload = "x-api-key: response-secret-value\n"
-    (tmp_path / "large.txt").write_text(payload, encoding="utf-8")
+    (tmp_path / "large.txt").write_text(payload, encoding="utf-8", newline="")
     events: list[dict] = []
 
     report, reviewer_note = _apply_round_secret_guard(
@@ -936,7 +1020,7 @@ def test_streaming_time_budget_exhaustion_skips_remaining_large_files(
     )
     payload = "padding line of text\n" * 8
     for name in ("large_a.log", "large_b.log"):
-        (tmp_path / name).write_text(payload, encoding="utf-8")
+        (tmp_path / name).write_text(payload, encoding="utf-8", newline="")
 
     report = scrub_recent_text_artifacts(
         tmp_path,
@@ -961,7 +1045,7 @@ def test_file_budget_exhaustion_enumerates_remaining_candidates(
     monkeypatch.setattr(secret_guard, "_MAX_SCANNED_FILES", 1)
     line = "status: ok\n"
     for index in range(60):
-        (tmp_path / f"file_{index:02d}.txt").write_text(line, encoding="utf-8")
+        (tmp_path / f"file_{index:02d}.txt").write_text(line, encoding="utf-8", newline="")
 
     report, reviewer_note = _apply_round_secret_guard(
         workdir=tmp_path,

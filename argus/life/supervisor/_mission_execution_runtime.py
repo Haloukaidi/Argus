@@ -259,13 +259,17 @@ class MissionExecutionRuntimeMixin:
                     item.execution_workdir = str(recorded_worktree)
                     return recorded_worktree
             worktree.parent.mkdir(parents=True, exist_ok=True)
-            _run_hidden(
-                ["git", "fetch", "origin", "main"],
-                cwd=repository,
-                check=True,
-                capture_output=True,
-                text=True,
-            )
+            try:
+                _run_hidden(
+                    ["git", "fetch", "origin", "main"],
+                    cwd=repository,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+            except subprocess.CalledProcessError as exc:
+                exc.add_note(f"Maintenance repository: {repository}; Git stderr: {exc.stderr}")
+                raise
             public_base = _run_hidden(
                 ["git", "rev-parse", "refs/remotes/origin/main"],
                 cwd=repository,

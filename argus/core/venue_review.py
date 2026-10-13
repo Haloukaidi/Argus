@@ -181,6 +181,12 @@ def enforce_venue_acceptance(
     decision.venue_review_required = True
     decision.venue_review_passed = False
     decision.venue_review_snapshot = before
+    if not venue.strip():
+        decision.status = "blocked"
+        decision.operator_question = "Which venue should the final paper be reviewed for?"
+        decision.reason = "No target venue is configured for the final paper review."
+        decision.next_action = "Set the target venue in the authoritative pipeline state, then request independent review."
+        return
     assessment = normalize_venue_review(decision.venue_review)
     if decision.venue_review is None and decision.status != "done":
         _keep_final_repairs_in_place(decision)

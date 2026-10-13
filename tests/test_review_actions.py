@@ -158,7 +158,7 @@ def test_pi_extension_invokes_the_host_action():
           await defer.execute('native-call', {review: 'Await the running GPU benchmark.'});
         """
         subprocess.run(
-            ["node", "--input-type=module", "-e", script, options.trusted_extensions[0]],
+            ["node", "--input-type=module", "-e", script, Path(options.trusted_extensions[0]).as_uri()],
             env={**os.environ, **options.extension_env}, check=True, capture_output=True, text=True,
         )
         assert actions.decision.status == "continue"
@@ -182,6 +182,11 @@ def test_mcp_tools_use_the_same_actions():
             await session.initialize()
             tools = await session.list_tools()
             assert "approve_review" in {tool.name for tool in tools.tools}
+            for tool in tools.tools:
+                assert tool.annotations is not None
+                assert tool.annotations.readOnlyHint is False
+                assert tool.annotations.destructiveHint is False
+                assert tool.annotations.openWorldHint is False
             result = await session.call_tool("approve_review", {"review": "The repair and its test pass."})
             assert not result.isError
 

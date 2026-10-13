@@ -188,7 +188,7 @@ def spec_check_dirs(workdir: Path) -> list[str]:
 
 def project_interpreter(workdir: Path) -> str:
     """The project's own venv interpreter when it has one, else this process's."""
-    candidate = workdir / ".venv" / "bin" / "python"
+    candidate = workdir / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     if candidate.exists():
         return str(candidate)
     return sys.executable
@@ -252,7 +252,7 @@ def parse_summary(output: str) -> tuple[dict[str, int], list[tuple[str, str, str
             counts["SKIPPED"] += count
             rows.append((
                 "SKIPPED",
-                skipped.group("location"),
+                skipped.group("location").replace("\\", "/"),
                 (skipped.group("reason") or "").strip(),
             ))
             continue

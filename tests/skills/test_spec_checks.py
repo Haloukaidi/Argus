@@ -50,6 +50,19 @@ _ALPHA = textwrap.dedent(
 _BETA = "def test_beta_ok():\n    assert 2 + 2 == 4\n"
 
 
+@pytest.mark.parametrize("platform,relative", [("nt", "Scripts/python.exe"), ("posix", "bin/python")])
+def test_project_interpreter_uses_native_venv(tmp_path, monkeypatch, platform, relative):
+    from types import SimpleNamespace
+
+    from argus.verticals.research import spec_checks
+
+    interpreter = tmp_path / ".venv" / relative
+    interpreter.parent.mkdir(parents=True)
+    interpreter.touch()
+    monkeypatch.setattr(spec_checks, "os", SimpleNamespace(name=platform))
+    assert spec_checks.project_interpreter(tmp_path) == str(interpreter)
+
+
 def _make_workdir(tmp_path: Path) -> Path:
     workdir = tmp_path / "project"
     spec = workdir / "tests" / "spec"

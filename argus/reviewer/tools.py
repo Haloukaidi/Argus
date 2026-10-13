@@ -117,6 +117,14 @@ class ReviewActions:
                 required.append("authority_impact")
             tools.append({
                 "name": name, "description": description,
+                # These actions update only the host-owned decision for this
+                # call. They neither mutate research artifacts nor contact
+                # external systems. Declare that scope for MCP approval policy.
+                "annotations": {
+                    "readOnlyHint": False,
+                    "destructiveHint": False,
+                    "openWorldHint": False,
+                },
                 "inputSchema": {"type": "object", "properties": fields, "required": required, "additionalProperties": False},
             })
         return tools

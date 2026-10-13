@@ -32,6 +32,17 @@ def assessment(recommendation="weak_accept", *, clear=True, issues=None, venue="
     }
 
 
+def test_missing_configured_venue_requests_configuration_not_backend_retry(tmp_path):
+    review = ReviewDecision(status="continue", reason="Needs figure revision", next_action="Revise",
+                            venue_review=assessment(venue=""))
+    enforce_venue_acceptance(review, venue="", before=None, artifact_root=tmp_path)
+    assert review.status == "blocked"
+    assert review.operator_question
+    assert not review.backend_unavailable
+    assert not review.venue_review_passed
+    assert not review.final_submission_certified
+
+
 @pytest.fixture
 def paper(tmp_path: Path) -> Path:
     persist_vertical(tmp_path, "research", target_venue="ICLR")

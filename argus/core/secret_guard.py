@@ -850,6 +850,16 @@ def scrub_recent_text_artifacts(
     budget_skip_count = 0
     streaming_seconds_spent = 0.0
     git_changed_paths = _git_changed_paths(root)
+    if os.name == "nt" and not str(root).startswith("\\\\?\\"):
+        # Prefix the walk root so descendants and atomic replacement names
+        # can exceed MAX_PATH. Keep Git's path and relative reports unchanged.
+        raw_root = str(root)
+        root = Path(
+            "\\\\?\\UNC\\" + raw_root[2:]
+            if raw_root.startswith("\\\\")
+            else "\\\\?\\" + raw_root
+        )
+
     def _walk_error(exc: OSError) -> None:
         filename = str(getattr(exc, "filename", "") or ".")
         errors.append(f"{filename}: {type(exc).__name__}")
